@@ -1,0 +1,305 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+#California Housing Data (1990) Analysis
+
+
+##I. Introduction and Problem
+
+As the salaries in California getting higher and higher, the cost of living in California is also getting higher than most of the state in the United States. According to CNBC news, California is the second most expensive state to live in the country. However, California is not on the list of top 10 U.S states with the highest medium annual income. Although a lot of people cannot afford to buy a house in California, there are still a lot of people trying to save money to buy their dream house in California.  In this California Housing Data (1990) Analysis report, I want to help the real estate agencies to find the right target market to reach out to instead of making cold calling sales. 
+
+##II. Data
+This original dataset is a modified version of the California Housing dataset available from Luís Torgo's page (University of Porto). The dataset is available from Kaggle competition dataset. It describes the location of the houses (longitude: how far west a house is, and latitude: how far north a house is), median age of a house within a block, total number of rooms within a block, total number of  bedrooms within a block, total number of people residing within a block, total number of households within a block, median income for households within a block, median house value for households within a block and the location of the house (oceanProximity). This dataset is a csv file containing 20640 observations and 10 variables. Although the data is not up to date, by studying this dataset, we can predict which segmentation would be the real estate agencies’ target market by creating different clusters that group housings that have similar descriptions.
+
+##III. Get Started
+
+```{r setup, include=FALSE}
+library(ggplot2) # visualization
+library(dplyr) # data manipulation
+library(data.table)
+library(caret)
+library(cluster)
+library(dendextend)
+library(NbClust)
+library(ggmap)
+library(flexclust)
+library(factoextra)
+```
+
+###Load Dataset
+```{r load data}
+#dataset: https://www.kaggle.com/harrywang/housing
+housing <- read.csv("housing.csv")
+str(housing)
+head(housing)
+```
+###Clean Dataset
+```{r}
+#check if there's missing data
+sum(is.na(housing))
+#find where the missing data are
+sapply(housing, function(x) sum(is.na(x)))
+#remove NAs
+housing.new<-housing[complete.cases(housing), ]
+#double check if there's missing data
+sum(is.na(housing.new))
+#Let's see the importance ranking of all the attributes to make sure the attribute that contains the removed data is not the most important one
+# train the model
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+model <- train(median_house_value~., data=housing.new, method="glm", preProcess="scale", trControl=control)
+#estimate variable importance
+importance <- varImp(model, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+```
+
+
+Since the missing data attribute total_room is not the most important factor, remove the NAs will not effect the result.
+
+##IV. K-means Algorithm
+The first step when using k-means clustering is to change the categorical data into numeric data 
+because k-means can only apply on numeric data. After that, we will need to indicate the 
+number of clusters (k) that will be generated in the final solution. The algorithm starts by 
+randomly selecting k objects from the dataset to serve as the initial centers for the clusters, 
+which are also called cluster means or centroids. Next, assign each of the remaining objects is 
+it’s closest centroid, where the closet distance is defined using the Euclidean distance between
+the object and the cluster mean. After the new assignment, the algorithm computes the 
+updated mean value of each cluster. The following step is to compare the objects to
+recalculated centroids and reassign them to different clusters if the objects are closer to the 
+clusters. The cluster assignment and centroid will keep on updating until none of the objects 
+need to reassign. 
+
+```{r}
+levels(housing.new$ocean_proximity)
+#We are using Kmeans Clustering which requires to use numeric data, so let's change the categorical data into numeric data
+housing.new$ocean_proximity <- as.numeric(housing.new$ocean_proximity)
+```
+###Using the elbow method to determine the optimal number of clusters 
+K-means is one of the unsupervised machine learning algorithm that groups a dataset into a user-specified number (k) of clusters. The algorithm is to cluster the data into k clusters, even if k is not the right number of clusters to use. Therefore, when using k-means clustering, it is important to try determine whether they are using the right number of clusters.One method to find the ideal number of clusters is the elbow method. The idea of the elbow method is to run k-means clustering on the dataset for using different k. For each value of k, calculate the sum of squared errors (SSE). Like this:
+```{r}
+wssplot <-function(housing.new,nc=35,seed=123){
+  wss<-(nrow(housing.new)-1)*sum(apply(housing.new,2,var))
+  for(i in 2:nc){
+    set.seed(seed)
+    wss[i]<-sum(kmeans(housing.new,centers=i)$withinss)}
+  plot(1:nc, wss, type="b",xlab="Number of Clusters",
+       ylab="within groups sum of squares")
+}
+
+wssplot(housing.new,nc=35)
+```
+```{r}
+#From the graph, we can tell that starting from 5, the curve is 
+#we need to scale the data before using kmeans clustering
+housingscaled<-scale(housing.new)
+##create 5 clusters
+k.means.fit <- kmeans(housingscaled, 5)
+#let's see the segment size
+k.means.fit$size
+```
+###Group each cluster
+```{r}
+#Combine the dataframe with the cluster 
+df<-housing.new %>%
+  mutate(k.means.fit$cluster)
+
+#Change last column name
+colnames(df)[11] <-"cluster"
+
+#Group each cluster
+cluster1<-df %>%
+  filter(cluster == 1) 
+
+cluster2<-df %>%
+  filter(cluster == 2) 
+
+cluster3<-df %>%
+  filter(cluster == 3)
+
+cluster4<-df %>%
+  filter(cluster == 4)
+
+cluster5<-df %>%
+  filter(cluster == 5)
+```
+
+```{r}
+#plot the segment size
+barplot(k.means.fit$size, names.arg=c("Cluster 1","Cluster 2","Cluster 3", "Cluster 4","Cluster 5"), ylab="Count", 
+        main="Barplot of Cluster Size")
+```
+###Median house value for household per segment 
+```{r}
+median_house_value_sum<-df %>%
+  group_by(k.means.fit$cluster)%>%summarize(median_house_value = sum(median_house_value))
+
+T1<-(median_house_value_sum[1,2]/sum(median_house_value_sum))*100
+T2<-(median_house_value_sum[2,2]/sum(median_house_value_sum))*100
+T3<-(median_house_value_sum[3,2]/sum(median_house_value_sum))*100
+T4<-(median_house_value_sum[4,2]/sum(median_house_value_sum))*100
+T5<-(median_house_value_sum[5,2]/sum(median_house_value_sum))*100
+cmatrix1 <- cbind(T1,T2,T3,T4,T5)
+colnames(cmatrix1) <- c("Cluster 1 Med_House_Value", "Cluster 2 Med_House_Value", "Cluster 3 Med_House_Value","Cluster 4 Med_House_Value","Cluster 5 Med_House_Value")
+cmatrix1
+```
+
+###Segment by Total Number of People Residing Within a Block
+```{r}
+population_sum<-df %>%
+  group_by(k.means.fit$cluster)%>%summarize(population = sum(population))
+
+P1<-(population_sum[1,2]/sum(population_sum))*100
+P2<-(population_sum[2,2]/sum(population_sum))*100
+P3<-(population_sum[3,2]/sum(population_sum))*100
+P4<-(population_sum[4,2]/sum(population_sum))*100
+P5<-(population_sum[5,2]/sum(population_sum))*100
+cmatrix2 <- cbind(P1,P2,P3,P4,P5)
+colnames(cmatrix2) <- c("Cluster 1 Population%", "Cluster 2 Population%", "Cluster 3 Population%","Cluster 4 Population%", "Cluster 5 Population%")
+cmatrix2
+```
+
+
+###Segment by Median Income Value
+```{r}
+median_income_sum<-df %>%
+  group_by(k.means.fit$cluster)%>%summarize(median_income = sum(median_income))
+
+I1<-(median_income_sum[1,2]/sum(median_income_sum))*100
+I2<-(median_income_sum[2,2]/sum(median_income_sum))*100
+I3<-(median_income_sum[3,2]/sum(median_income_sum))*100
+I4<-(median_income_sum[4,2]/sum(median_income_sum))*100
+I5<-(median_income_sum[5,2]/sum(median_income_sum))*100
+cmatrix3 <- cbind(I1,I2,I3,I4,I5)
+colnames(cmatrix3) <- c("Cluster 1 Med Income%", "Cluster 2 Med Income%", "Cluster 3 Med Income%","Cluster 4 Med Income%", "Cluster 5 Med Income%")
+cmatrix3
+```
+
+###Segment by Median age of a house within a block
+####Cluster1
+```{r}
+#I want to know what's the most common housing_median_age in each cluster
+housing_median_age_sum<-df %>%
+  group_by(k.means.fit$cluster)
+#cluster1
+w1 = table(cluster1$housing_median_age)
+t1 = as.data.frame(w1)
+t1 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Housing Median Age") + ylab("Frequency") + ggtitle("Distribution of Housing Median Age in Cluster 1") 
+```
+
+####Cluster2
+```{r}
+#cluster2
+w2 = table(cluster2$housing_median_age)
+t2 = as.data.frame(w2)
+t2 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Housing Median Age") + ylab("Frequency") + ggtitle("Distribution of Housing Median Age in Cluster 2") 
+```
+
+####Cluster3
+```{r}
+#cluster3
+w3 = table(cluster3$housing_median_age)
+t3 = as.data.frame(w3)
+t3 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Housing Median Age") + ylab("Frequency") + ggtitle("Distribution of Housing Median Age in Cluster 3") 
+```
+
+####Cluster4
+```{r}
+#cluster4
+w4 = table(cluster4$housing_median_age)
+t4 = as.data.frame(w4)
+t4 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Housing Median Age") + ylab("Frequency") + ggtitle("Distribution of Housing Median Age in Cluster 4") 
+```
+
+####Cluster5
+```{r}
+#cluster5
+w5 = table(cluster5$housing_median_age)
+t5 = as.data.frame(w5)
+t5 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Housing Median Age") + ylab("Frequency") + ggtitle("Distribution of Housing Median Age in Cluster 5") 
+```
+
+###Segment by Location of the house w.r.t ocean/sea
+
+####Cluster1
+```{r}
+#ocean_proximity
+o1 = table(cluster1$ocean_proximity)
+ot1 = as.data.frame(o1)
+ot1
+levels(housing$ocean_proximity)
+ot1 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Ocean Proximity Preference") + ylab("Frequency") + ggtitle("Distribution of Ocean Proximity in Cluster 1")
+#1: <1H OCEAN"  2: "INLAND" 3: "ISLAND" 4: "NEAR BAY" 5: "NEAR OCEAN"
+```
+
+####Cluster2
+```{r}
+
+o2 = table(cluster2$ocean_proximity)
+ot2 = as.data.frame(o2)
+ot2
+levels(housing$ocean_proximity)
+ot2 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Ocean Proximity Preference") + ylab("Frequency") + ggtitle("Distribution of Ocean Proximity in Cluster 2")
+#1: <1H OCEAN"  2: "INLAND" 3: "ISLAND" 4: "NEAR BAY" 5: "NEAR OCEAN"
+```
+
+Living less than 1 hr drive away from the ocean is the most popular preference in cluster 2. In this cluster, there is 1 person want to live in Island. This is an outliner because there is only one person out of the entire dataset bought a house in the Island
+
+####Cluster3
+```{r}
+
+o3 = table(cluster3$ocean_proximity)
+ot3 = as.data.frame(o3)
+ot3
+levels(housing$ocean_proximity)
+ot3 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Ocean Proximity Preference") + ylab("Frequency") + ggtitle("Distribution of Ocean Proximity in Cluster 3")
+#1: <1H OCEAN"  2: "INLAND" 3: "ISLAND" 4: "NEAR BAY" 5: "NEAR OCEAN"
+```
+
+
+####Cluster4
+```{r}
+
+o4 = table(cluster3$ocean_proximity)
+ot4 = as.data.frame(o4)
+ot4
+levels(housing$ocean_proximity)
+ot4 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Ocean Proximity Preference") + ylab("Frequency") + ggtitle("Distribution of Ocean Proximity in Cluster 4")
+#1: <1H OCEAN"  2: "INLAND" 3: "ISLAND" 4: "NEAR BAY" 5: "NEAR OCEAN"
+```
+
+####Cluster5
+```{r}
+
+o5 = table(cluster3$ocean_proximity)
+ot5 = as.data.frame(o5)
+ot5
+levels(housing$ocean_proximity)
+ot5 %>% as.data.frame %>% ggplot(aes(x = Var1, y = Freq,colour = Freq)) + geom_histogram(stat = "identity") + xlab("Ocean Proximity Preference") + ylab("Frequency") + ggtitle("Distribution of Ocean Proximity in Cluster 5")
+#1: <1H OCEAN"  2: "INLAND" 3: "ISLAND" 4: "NEAR BAY" 5: "NEAR OCEAN"
+```
+
+##V. Analysis and Conclusion
+From the results shown above, we can tell that cluster4 has the biggest segmentation size. This 
+means that a lot of people who bought the houses in 1990 are in cluster4. As a result, we want to 
+look into cluster 4 to see the descriptions of this segmentation. Cluster 4 has the highest median 
+income, and the highest total number of people residing within a block. So we can assume that 
+cluster 4 might be the group of people who have families and have stable incomes. Cluster 4 also 
+has the highest median house value, which means that just like what we predicted, cluster 4 is a 
+good target market because they generated the highest profit. Additionally, we can tell that people 
+in cluster 4 tend to buy middle housing median age, they don't want old houses or new houses. The 
+most popular housing median age is between 35 -36. After seeing the distribution of Ocean 
+Proximity preference plot from all the clusters, we can conclude that most people in general prefer 
+to live less than one hour drive away from the ocean.
+
+##VI. Reference
+Han, Jiawei, and Micheline Kamber. Data Mining–Concepts and Techniques. Morgan Kaufmann Publishers, 2012.
+
+
+
+
+
